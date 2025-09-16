@@ -1,8 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any
+import re
 
-app = FastAPI(title="SmartForm Parser API")
+app = FastAPI(title="SmartForm Parser API with ABAP Code Parsing")
 
 
 # --- Request Model ---
@@ -20,44 +21,54 @@ class SmartformRow(BaseModel):
 
 # --- Parser Logic ---
 def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    page_set = set()
-    window_set = set()
-    field_set = set()
-    table_set = set()
+    pages = set()
+    windows = set()
+    fields = set()
+    tables = set()
+
+    capture_window = False  # flag to capture INAME after WI
 
     for row in rows:
-        elem = row.get("ELEM_NAME", "").strip()
-        text = row.get("TEXT_PAYLOAD", "").strip()
-        node = row.get("NODE_TYPE", "").strip()
+        elem = row.get("ELEM_NAME", "")
+        text = row.get("TEXT_PAYLOAD", "") or ""
+        node = row.get("NODE_TYPE", "")
 
-        # Pages
+        # --- 1. Pages ---
         if elem == "INAME" and text.startswith("%PAGE"):
-            page_set.add(text)
+            pages.add(text)
 
-        # Windows
-        if node == "ELEMENT" and elem == "INAME" and text.upper() == "MAIN":
-            window_set.add(text)
+        # --- 2. Detect window marker (NODETYPE = WI) ---
+        if elem == "NODETYPE" and text == "WI":
+            capture_window = True
+            continue
 
-        # Captions / Field names (keep unique)
+        if capture_window and elem == "INAME":
+            windows.add(text)
+            capture_window = False
+
+        # --- 3. Captions / Names directly from nodes ---
         if elem in ["CAPTION", "FORMNAME", "NAME", "TYPENAME"]:
-            key = f"{elem}:{text}"
-            field_set.add(key)
+            fields.add(f"{elem}:{text}")
 
-        # Tables (heuristic: TYPE names starting with T or containing TABLE/TAB)
+        # --- 4. Detect TABLES in ABAP code ---
+        select_tables = re.findall(r"\bFROM\s+([A-Za-z0-9_/]+)", text, re.IGNORECASE)
+        for t in select_tables:
+            tables.add(t.upper())
+
+        # --- 5. Detect fields from work areas (pattern: wa-field) ---
+        workarea_fields = re.findall(r"\b([A-Za-z0-9_]+)-([A-Za-z0-9_]+)", text)
+        for wa, field in workarea_fields:
+            fields.add(f"{wa.upper()}-{field.upper()}")
+
+        # --- 6. Tables from TYPE references ---
         if elem == "TYPENAME" and ("T" in text or "TAB" in text.upper()):
-            table_set.add(text)
-
-    # Convert back to list of dicts
-    pages = [{"page_name": p} for p in sorted(page_set)]
-    windows = [{"window_name": w} for w in sorted(window_set)]
-    fields = [{k.split(":", 1)[0]: k.split(":", 1)[1]} for k in sorted(field_set)]
-    tables = [{"table_type": t} for t in sorted(table_set)]
+            tables.add(text)
 
     return {
-        "pages": pages,
-        "windows": windows,
-        "fields": fields,
-        "tables": tables,
+        "pages": [{"page_name": p} for p in sorted(pages)],
+        "windows": [{"window_name": w} for w in sorted(windows)],
+        "fields": [{"field": f} for f in sorted(fields)],
+        "tables": [{"table_type": t} for t in sorted(tables)],
     }
 
 
