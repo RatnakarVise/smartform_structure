@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any
 import re
 
-app = FastAPI(title="SmartForm Parser API with ABAP Code Parsing")
+app = FastAPI(title="SmartForm Parser API with Page-Window Structure")
 
 
 # --- Request Model ---
@@ -21,55 +21,141 @@ class SmartformRow(BaseModel):
 
 # --- Parser Logic ---
 def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    pages = set()
-    windows = set()
-    fields = set()
-    tables = set()
-
-    capture_window = False  # flag to capture INAME after WI
+    pages = []
+    current_page = None
+    current_window = None
+    current_graphic = None
+    capture_page = False
+    capture_window = False
+    capture_graphic = False
+    last_page_name = None
 
     for row in rows:
         elem = row.get("ELEM_NAME", "")
-        text = row.get("TEXT_PAYLOAD", "") or ""
+        text = (row.get("TEXT_PAYLOAD", "") or "").strip()
         node = row.get("NODE_TYPE", "")
 
-        # --- 1. Pages ---
-        if elem == "INAME" and text.startswith("%PAGE"):
-            pages.add(text)
+        # --- Detect Page ---
+        if elem == "NODETYPE" and text == "PA":
+            capture_page = True
+            continue
 
-        # --- 2. Detect window marker (NODETYPE = WI) ---
+        if capture_page and elem == "INAME":
+            if text != last_page_name:  # prevent duplicate page entries
+                current_page = {"page_name": text, "windows": [], "graphics": []}
+                pages.append(current_page)
+                last_page_name = text
+            current_window = None
+            current_graphic = None
+            capture_page = False
+            continue
+
+        # --- Detect Window Marker ---
         if elem == "NODETYPE" and text == "WI":
             capture_window = True
             continue
 
         if capture_window and elem == "INAME":
-            windows.add(text)
+            current_window = {
+                "window_name": text,
+                "rows": [],
+                "cells": [],
+                "texts": [],
+                "code": [],
+                "captions": [],
+                "fields": [],
+                "tables": [],
+                "_captions_set": set(),
+                "_fields_set": set(),
+                "_tables_set": set(),
+            }
+            if current_page:
+                current_page["windows"].append(current_window)
             capture_window = False
+            prev_node, prev_text = node, text
+            continue
 
-        # --- 3. Captions / Names directly from nodes ---
-        if elem in ["CAPTION", "FORMNAME", "NAME", "TYPENAME"]:
-            fields.add(f"{elem}:{text}")
+        # --- Detect Graphic Marker ---
+        if elem == "NODETYPE" and text == "GR":
+            capture_graphic = True
+            prev_node, prev_text = node, text
+            continue
 
-        # --- 4. Detect TABLES in ABAP code ---
-        select_tables = re.findall(r"\bFROM\s+([A-Za-z0-9_/]+)", text, re.IGNORECASE)
-        for t in select_tables:
-            tables.add(t.upper())
+        if capture_graphic and elem == "INAME":
+            current_graphic = {
+                "graphic_name": text,
+                "captions": [],
+                "fields": [],
+                "tables": [],
+                "_captions_set": set(),
+                "_fields_set": set(),
+                "_tables_set": set(),
+            }
+            if current_page:
+                current_page["graphics"].append(current_graphic)
+            capture_graphic = False
+            prev_node, prev_text = node, text
+            continue
 
-        # --- 5. Detect fields from work areas (pattern: wa-field) ---
-        workarea_fields = re.findall(r"\b([A-Za-z0-9_]+)-([A-Za-z0-9_]+)", text)
-        for wa, field in workarea_fields:
-            fields.add(f"{wa.upper()}-{field.upper()}")
+        # --- Classify & extract inside current window ---
+        if current_window:
+            # Captions / Names
+            if elem in ["CAPTION", "FORMNAME", "NAME", "TYPENAME"] and text:
+                current_window["_captions_set"].add(f"{elem}:{text}")
 
-        # --- 6. Tables from TYPE references ---
-        if elem == "TYPENAME" and ("T" in text or "TAB" in text.upper()):
-            tables.add(text)
+            # Detect tables from SQL
+            select_tables = re.findall(r"\bFROM\s+([A-Za-z0-9_./]+)", text, re.IGNORECASE)
+            for t in select_tables:
+                current_window["_tables_set"].add(t.upper())
 
-    return {
-        "pages": [{"page_name": p} for p in sorted(pages)],
-        "windows": [{"window_name": w} for w in sorted(windows)],
-        "fields": [{"field": f} for f in sorted(fields)],
-        "tables": [{"table_type": t} for t in sorted(tables)],
-    }
+            # Workarea fields
+            workarea_fields = re.findall(r"\b([A-Za-z0-9_]+)-([A-Za-z0-9_]+)\b", text)
+            for wa, field in workarea_fields:
+                current_window["_fields_set"].add(f"{wa.upper()}-{field.upper()}")
+
+            # Tables from TYPE references
+            if elem == "TYPENAME" and ("T" in text or "TAB" in text.upper()):
+                current_window["_tables_set"].add(text)
+
+            # Structural classification
+            if text.startswith("%ROW"):
+                current_window["rows"].append(text)
+            elif text.startswith("%CELL"):
+                current_window["cells"].append(text)
+            elif text.startswith("%TEXT"):
+                current_window["texts"].append(text)
+            elif elem == "TEXT" and text:  # only ELEM_NAME = TEXT goes into code
+                current_window["code"].append(text)
+
+        # --- Classify & extract inside current graphic ---
+        if current_graphic:
+            if elem in ["CAPTION", "FORMNAME", "NAME", "TYPENAME"] and text:
+                current_graphic["_captions_set"].add(f"{elem}:{text}")
+
+            select_tables = re.findall(r"\bFROM\s+([A-Za-z0-9_./]+)", text, re.IGNORECASE)
+            for t in select_tables:
+                current_graphic["_tables_set"].add(t.upper())
+
+            workarea_fields = re.findall(r"\b([A-Za-z0-9_]+)-([A-Za-z0-9_]+)\b", text)
+            for wa, field in workarea_fields:
+                current_graphic["_fields_set"].add(f"{wa.upper()}-{field.upper()}")
+
+            if elem == "TYPENAME" and ("T" in text or "TAB" in text.upper()):
+                current_graphic["_tables_set"].add(text)
+                
+        prev_node, prev_text = node, text
+    # Finalize sets -> lists
+    for page in pages:
+        for win in page.get("windows", []):
+            win["captions"] = sorted(win.pop("_captions_set"))
+            win["fields"] = sorted(win.pop("_fields_set"))
+            win["tables"] = sorted(win.pop("_tables_set"))
+        for gr in page.get("graphics", []):
+            gr["captions"] = sorted(gr.pop("_captions_set"))
+            gr["fields"] = sorted(gr.pop("_fields_set"))
+            gr["tables"] = sorted(gr.pop("_tables_set"))
+
+    return {"pages": pages}
 
 
 # --- API Endpoint ---
