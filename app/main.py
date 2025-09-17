@@ -29,7 +29,7 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     capture_window = False
     capture_graphic = False
     last_page_name = None
-
+    code_buffer = [] 
     for row in rows:
         elem = row.get("ELEM_NAME", "")
         text = (row.get("TEXT_PAYLOAD", "") or "").strip()
@@ -124,8 +124,12 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                 current_window["cells"].append(text)
             elif text.startswith("%TEXT"):
                 current_window["texts"].append(text)
-            elif elem == "TEXT" and text:  # only ELEM_NAME = TEXT goes into code
-                current_window["code"].append(text)
+            elif elem == "item" and text:  # only ELEM_NAME = item goes into code
+                code_buffer.append(text)
+            else:
+                if code_buffer:  # flush when ITEM block ends
+                    current_window["code"].append("\n".join(code_buffer))
+                    code_buffer = []
 
         # --- Classify & extract inside current graphic ---
         if current_graphic:
@@ -142,9 +146,12 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
             if elem == "TYPENAME" and ("T" in text or "TAB" in text.upper()):
                 current_graphic["_tables_set"].add(text)
-                
+
         prev_node, prev_text = node, text
     # Finalize sets -> lists
+    # after loop, flush if last rows were ITEMs
+    if code_buffer and current_window:
+        current_window["code"].append("\n".join(code_buffer))
     for page in pages:
         for win in page.get("windows", []):
             win["captions"] = sorted(win.pop("_captions_set"))
