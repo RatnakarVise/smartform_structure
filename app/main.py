@@ -125,7 +125,18 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             elif text.startswith("%TEXT"):
                 current_window["texts"].append(text)
             elif elem == "item" and text:  # only ELEM_NAME = item goes into code
-                code_buffer.append(text)
+                cleaned_lines = []
+                for line in text.splitlines():
+                    line = line.strip()
+                    if line.startswith("*"):  # full-line comment
+                        continue
+                    if '"' in line:  # inline comment
+                        line = line.split('"', 1)[0].rstrip()
+                    if line:  # only keep non-empty code lines
+                        cleaned_lines.append(line)
+                if cleaned_lines:
+                    code_buffer.append("\n".join(cleaned_lines))
+                # code_buffer.append(text)
             else:
                 if code_buffer:  # flush when ITEM block ends
                     current_window["code"].append("\n".join(code_buffer))
