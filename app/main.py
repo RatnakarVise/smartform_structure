@@ -24,10 +24,10 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     pages = []
     current_page = None
     current_window = None
-    current_graphic = None
+    # current_graphic = None
     capture_page = False
     capture_window = False
-    capture_graphic = False
+    # capture_graphic = False
     last_page_name = None
     code_buffer = [] 
     for row in rows:
@@ -42,11 +42,11 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
         if capture_page and elem == "INAME":
             if text != last_page_name:  # prevent duplicate page entries
-                current_page = {"page_name": text, "windows": [], "graphics": []}
+                current_page = {"page_name": text, "windows": []}
                 pages.append(current_page)
                 last_page_name = text
             current_window = None
-            current_graphic = None
+            # current_graphic = None
             capture_page = False
             continue
 
@@ -72,30 +72,29 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             if current_page:
                 current_page["windows"].append(current_window)
             capture_window = False
-            prev_node, prev_text = node, text
             continue
 
         # --- Detect Graphic Marker ---
-        if elem == "NODETYPE" and text == "GR":
-            capture_graphic = True
-            prev_node, prev_text = node, text
-            continue
+        # if elem == "NODETYPE" and text == "GR":
+        #     capture_graphic = True
+        #     prev_node, prev_text = node, text
+        #     continue
 
-        if capture_graphic and elem == "INAME":
-            current_graphic = {
-                "graphic_name": text,
-                "captions": [],
-                "fields": [],
-                "tables": [],
-                "_captions_set": set(),
-                "_fields_set": set(),
-                "_tables_set": set(),
-            }
-            if current_page:
-                current_page["graphics"].append(current_graphic)
-            capture_graphic = False
-            prev_node, prev_text = node, text
-            continue
+        # if capture_graphic and elem == "INAME":
+        #     current_graphic = {
+        #         "graphic_name": text,
+        #         "captions": [],
+        #         "fields": [],
+        #         "tables": [],
+        #         "_captions_set": set(),
+        #         "_fields_set": set(),
+        #         "_tables_set": set(),
+        #     }
+        #     if current_page:
+        #         current_page["graphics"].append(current_graphic)
+        #     capture_graphic = False
+        #     prev_node, prev_text = node, text
+        #     continue
 
         # --- Classify & extract inside current window ---
         if current_window:
@@ -143,22 +142,22 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                     code_buffer = []
 
         # --- Classify & extract inside current graphic ---
-        if current_graphic:
-            if elem in ["CAPTION", "FORMNAME", "NAME", "TYPENAME"] and text:
-                current_graphic["_captions_set"].add(f"{elem}:{text}")
+        # if current_graphic:
+        #     if elem in ["CAPTION", "FORMNAME", "NAME", "TYPENAME"] and text:
+        #         current_graphic["_captions_set"].add(f"{elem}:{text}")
 
-            select_tables = re.findall(r"\bFROM\s+([A-Za-z0-9_./]+)", text, re.IGNORECASE)
-            for t in select_tables:
-                current_graphic["_tables_set"].add(t.upper())
+        #     select_tables = re.findall(r"\bFROM\s+([A-Za-z0-9_./]+)", text, re.IGNORECASE)
+        #     for t in select_tables:
+        #         current_graphic["_tables_set"].add(t.upper())
 
-            workarea_fields = re.findall(r"\b([A-Za-z0-9_]+)-([A-Za-z0-9_]+)\b", text)
-            for wa, field in workarea_fields:
-                current_graphic["_fields_set"].add(f"{wa.upper()}-{field.upper()}")
+        #     workarea_fields = re.findall(r"\b([A-Za-z0-9_]+)-([A-Za-z0-9_]+)\b", text)
+        #     for wa, field in workarea_fields:
+        #         current_graphic["_fields_set"].add(f"{wa.upper()}-{field.upper()}")
 
-            if elem == "TYPENAME" and ("T" in text or "TAB" in text.upper()):
-                current_graphic["_tables_set"].add(text)
+        #     if elem == "TYPENAME" and ("T" in text or "TAB" in text.upper()):
+        #         current_graphic["_tables_set"].add(text)
 
-        prev_node, prev_text = node, text
+        # prev_node, prev_text = node, text
     # Finalize sets -> lists
     # after loop, flush if last rows were ITEMs
     if code_buffer and current_window:
@@ -170,12 +169,12 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             win["fields"] = sorted(win.pop("_fields_set"))
             win["tables"] = sorted(win.pop("_tables_set"))
             win.pop("_captions_set", None)
-        for gr in page.get("graphics", []):
-            # gr["captions"] = sorted(gr.pop("_captions_set"))
-            gr["captions"] = []
-            gr["fields"] = sorted(gr.pop("_fields_set"))
-            gr["tables"] = sorted(gr.pop("_tables_set"))
-            gr.pop("_captions_set", None)
+        # for gr in page.get("graphics", []):
+        #     # gr["captions"] = sorted(gr.pop("_captions_set"))
+        #     gr["captions"] = []
+        #     gr["fields"] = sorted(gr.pop("_fields_set"))
+        #     gr["tables"] = sorted(gr.pop("_tables_set"))
+        #     gr.pop("_captions_set", None)
 
     return {"pages": pages}
 
