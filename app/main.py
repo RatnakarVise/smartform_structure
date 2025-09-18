@@ -165,13 +165,17 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         current_window["code"].append("\n".join(code_buffer))
     for page in pages:
         for win in page.get("windows", []):
-            win["captions"] = sorted(win.pop("_captions_set"))
+            # win["captions"] = sorted(win.pop("_captions_set"))
+            win["captions"] = []
             win["fields"] = sorted(win.pop("_fields_set"))
             win["tables"] = sorted(win.pop("_tables_set"))
+            win.pop("_captions_set", None)
         for gr in page.get("graphics", []):
-            gr["captions"] = sorted(gr.pop("_captions_set"))
+            # gr["captions"] = sorted(gr.pop("_captions_set"))
+            gr["captions"] = []
             gr["fields"] = sorted(gr.pop("_fields_set"))
             gr["tables"] = sorted(gr.pop("_tables_set"))
+            gr.pop("_captions_set", None)
 
     return {"pages": pages}
 
