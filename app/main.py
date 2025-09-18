@@ -44,8 +44,9 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             continue
 
         if capture_page and elem == "INAME":
-            if text != last_page_name:  # prevent duplicate page entries
-                current_page = {"page_name": text, "windows": []}
+            clean_name = text.lstrip("%")   # <-- remove leading %
+            if clean_name != last_page_name:  # prevent duplicate page entries
+                current_page = {"page_name": clean_name, "windows": []}
                 pages.append(current_page)
                 last_page_name = text
             current_window = None
@@ -58,8 +59,9 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             continue
 
         if capture_window and elem == "INAME":
+            clean_name = text.lstrip("%")   # <-- remove leading %
             current_window = {
-                "window_name": text,
+                "window_name": clean_name,
                 "rows": [],
                 "cells": [],
                 "texts": [],
