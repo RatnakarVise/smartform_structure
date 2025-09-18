@@ -30,6 +30,9 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     # capture_graphic = False
     last_page_name = None
     code_buffer = [] 
+    capture_test_block = False
+
+
     for row in rows:
         elem = row.get("ELEM_NAME", "")
         text = (row.get("TEXT_PAYLOAD", "") or "").strip()
@@ -46,7 +49,6 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                 pages.append(current_page)
                 last_page_name = text
             current_window = None
-            # current_graphic = None
             capture_page = False
             continue
 
@@ -74,30 +76,24 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             capture_window = False
             continue
 
-        # --- Detect Graphic Marker ---
-        # if elem == "NODETYPE" and text == "GR":
-        #     capture_graphic = True
-        #     prev_node, prev_text = node, text
-        #     continue
+        # --- NEW: Detect start of TEST block ---
+        if elem == "INAME" and text.startswith("%TEXT"):
+            capture_test_block = True
+            continue
 
-        # if capture_graphic and elem == "INAME":
-        #     current_graphic = {
-        #         "graphic_name": text,
-        #         "captions": [],
-        #         "fields": [],
-        #         "tables": [],
-        #         "_captions_set": set(),
-        #         "_fields_set": set(),
-        #         "_tables_set": set(),
-        #     }
-        #     if current_page:
-        #         current_page["graphics"].append(current_graphic)
-        #     capture_graphic = False
-        #     prev_node, prev_text = node, text
-        #     continue
+        # --- Stop collecting when STYLE_NAME appears ---
+        if capture_test_block and elem == "STYLE_NAME":
+            capture_test_block = False
+            continue
+
+        # --- Collect TDLINE lines if inside TEST block ---
+        if capture_test_block and elem == "TDLINE" and text:
+            if current_window:
+                current_window["texts"].append(text)
+            continue
 
         # --- Classify & extract inside current window ---
-        if current_window:
+        if current_window and not capture_test_block:
             # Captions / Names
             if elem in ["CAPTION", "FORMNAME", "NAME", "TYPENAME"] and text:
                 current_window["_captions_set"].add(f"{elem}:{text}")
@@ -140,24 +136,6 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
                 if code_buffer:  # flush when ITEM block ends
                     current_window["code"].append("\n".join(code_buffer))
                     code_buffer = []
-
-        # --- Classify & extract inside current graphic ---
-        # if current_graphic:
-        #     if elem in ["CAPTION", "FORMNAME", "NAME", "TYPENAME"] and text:
-        #         current_graphic["_captions_set"].add(f"{elem}:{text}")
-
-        #     select_tables = re.findall(r"\bFROM\s+([A-Za-z0-9_./]+)", text, re.IGNORECASE)
-        #     for t in select_tables:
-        #         current_graphic["_tables_set"].add(t.upper())
-
-        #     workarea_fields = re.findall(r"\b([A-Za-z0-9_]+)-([A-Za-z0-9_]+)\b", text)
-        #     for wa, field in workarea_fields:
-        #         current_graphic["_fields_set"].add(f"{wa.upper()}-{field.upper()}")
-
-        #     if elem == "TYPENAME" and ("T" in text or "TAB" in text.upper()):
-        #         current_graphic["_tables_set"].add(text)
-
-        # prev_node, prev_text = node, text
     # Finalize sets -> lists
     # after loop, flush if last rows were ITEMs
     if code_buffer and current_window:
@@ -169,13 +147,6 @@ def parse_smartform(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             win["fields"] = sorted(win.pop("_fields_set"))
             win["tables"] = sorted(win.pop("_tables_set"))
             win.pop("_captions_set", None)
-        # for gr in page.get("graphics", []):
-        #     # gr["captions"] = sorted(gr.pop("_captions_set"))
-        #     gr["captions"] = []
-        #     gr["fields"] = sorted(gr.pop("_fields_set"))
-        #     gr["tables"] = sorted(gr.pop("_tables_set"))
-        #     gr.pop("_captions_set", None)
-
     return {"pages": pages}
 
 
